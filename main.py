@@ -154,6 +154,52 @@ class App(ctk.CTk):
         if not folder or not os.path.isdir(folder):
             self._append("Грешка: изберете валидна папка.")
             return
+
+        parent = os.path.dirname(folder)
+        name = os.path.basename(folder)
+        old_name = f"{name}_old"
+        delete_orig = self._delete_var.get()
+
+        msg = (
+            f"Потвърдете операцията:\n\n"
+            f"  Избрана папка:  {folder}\n"
+            f"  Ще се преименува на:  {old_name}\n"
+            f"  Конвертираните файлове → нова папка: {name}\n"
+        )
+        if delete_orig:
+            msg += f"\n  ⚠ Оригиналната папка ({old_name}) ще бъде ИЗТРИТА след конвертиране!\n"
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Потвърждение")
+        dialog.geometry("500x260")
+        dialog.resizable(False, False)
+        dialog.grab_set()
+        dialog.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(dialog, text=msg, justify="left",
+                     font=ctk.CTkFont(size=13)).grid(
+            row=0, column=0, columnspan=2, padx=20, pady=(20, 10), sticky="w"
+        )
+
+        confirmed = [False]
+
+        def _ok():
+            confirmed[0] = True
+            dialog.destroy()
+
+        ctk.CTkButton(dialog, text="Продължи", width=120, command=_ok).grid(
+            row=1, column=0, padx=(20, 8), pady=20, sticky="e"
+        )
+        ctk.CTkButton(dialog, text="Отказ", width=120, fg_color="gray",
+                      command=dialog.destroy).grid(
+            row=1, column=1, padx=(8, 20), pady=20, sticky="w"
+        )
+
+        self.wait_window(dialog)
+
+        if not confirmed[0]:
+            return
+
         self._converting = True
         self._btn.configure(state="disabled", text="Конвертиране…")
         self._bar.set(0)
