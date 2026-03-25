@@ -1,6 +1,7 @@
 import os
 import pathlib
 import logging
+import shutil
 import threading
 import customtkinter as ctk
 from tkinter import filedialog
@@ -19,12 +20,20 @@ ctk.set_default_color_theme("blue")
 SUPPORTED_EXT = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"}
 
 
+def _fmt_size(b: int) -> str:
+    if b < 1024:
+        return f"{b} B"
+    if b < 1024 * 1024:
+        return f"{b / 1024:.1f} KB"
+    return f"{b / 1024 / 1024:.1f} MB"
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("WebP Converter")
-        self.geometry("720x620")
-        self.minsize(600, 560)
+        self.geometry("720x640")
+        self.minsize(600, 580)
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(6, weight=1)
         self._converting = False
@@ -78,16 +87,12 @@ class App(ctk.CTk):
 
         self._transp_var = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(
-            sf,
-            text="Запази прозрачност",
-            variable=self._transp_var,
+            sf, text="Запази прозрачност", variable=self._transp_var
         ).grid(row=1, column=0, columnspan=3, padx=12, pady=(0, 6), sticky="w")
 
         self._delete_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
-            sf,
-            text="Изтриване на оригинала",
-            variable=self._delete_var,
+            sf, text="Изтриване на оригинала", variable=self._delete_var
         ).grid(row=2, column=0, columnspan=3, padx=12, pady=(0, 12), sticky="w")
 
         # Prefix row
@@ -102,12 +107,27 @@ class App(ctk.CTk):
             placeholder_text="Незадължително — напр. site1",
         ).grid(row=0, column=1, padx=8, pady=12, sticky="ew")
 
-        # Convert button
+        self._rename_only_var = ctk.BooleanVar(value=False)
+        self._rename_only_cb = ctk.CTkCheckBox(
+            pxf,
+            text="Само преименуване",
+            variable=self._rename_only_var,
+            state="disabled",
+        )
+        self._rename_only_cb.grid(
+            row=1, column=0, columnspan=2, padx=12, pady=(0, 12), sticky="w"
+        )
+
+        self._prefix_var.trace_add("write", self._on_prefix_change)
+
+        # Start button
         self._btn = ctk.CTkButton(
             self,
-            text="Конвертирай в WebP",
+            text="Старт",
             height=44,
             font=ctk.CTkFont(size=15, weight="bold"),
+            fg_color=("#2d9e52", "#2d9e52"),
+            hover_color=("#246e3a", "#246e3a"),
             command=self._start,
         )
         self._btn.grid(row=4, column=0, padx=20, pady=10, sticky="ew")
@@ -137,8 +157,15 @@ class App(ctk.CTk):
         if folder:
             self._folder_var.set(folder)
 
+    def _on_prefix_change(self, *_):
+        has_prefix = bool(self._prefix_var.get().strip())
+        if has_prefix:
+            self._rename_only_cb.configure(state="normal")
+        else:
+            self._rename_only_var.set(False)
+            self._rename_only_cb.configure(state="disabled")
+
     def _log(self, msg: str):
-        """Thread-safe: schedule text append on the main thread."""
         self.after(0, self._append, msg)
 
     def _append(self, msg: str):
@@ -161,7 +188,7 @@ class App(ctk.CTk):
             self._append("Грешка: изберете валидна папка.")
             return
         self._converting = True
-        self._btn.configure(state="disabled", text="Конвертиране…")
+        self._btn.configure(state="disabled", text="Работи…")
         self._bar.set(0)
         self._log_box.delete("1.0", "end")
         threading.Thread(target=self._run, daemon=True).start()
@@ -172,96 +199,89 @@ class App(ctk.CTk):
         preserve = self._transp_var.get()
         delete_orig = self._delete_var.get()
         prefix = self._prefix_var.get().strip()
-        logging.info(
-            f"Start: folder={folder} quality={quality} "
-            f"preserve={preserve} delete_orig={delete_orig} prefix='{prefix}'"
-        )
-        parts = [f"качество={quality}"]
-        parts.append("прозрачност=" + ("запазена" if preserve else "не запазена"))
-        if prefix:
-            parts.append(f"префикс='{prefix}'")
+        rename_only = self._rename_only_var.get() and bool(prefix)
+
+        parts = []
+        if rename_only:
+            parts.append(f"само преименуване с префикс='{prefix}'")
+        else:
+            parts.append(f"качество={quality}")
+            parts.append("прозрачност=" + ("запазена" if preserve else "не запазена"))
+            if prefix:
+                parts.append(f"префикс='{prefix}'")
         if delete_orig:
             parts.append("оригиналът ще бъде изтрит")
+
+        logging.info(f"Start: folder={folder} " + ", ".join(parts))
         self._log("Начало: " + ", ".join(parts))
-        converted, total = self._convert(folder, quality, preserve, delete_orig, prefix)
-        logging.info(f"Done: {converted}/{total}")
-        self.after(0, self._done, converted, total)
 
-    def _done(self, converted: int, total: int):
+        done, total = self._process(folder, quality, preserve, delete_orig, prefix, rename_only)
+        logging.info(f"Done: {done}/{total}")
+        self.after(0, self._done, done, total, rename_only)
+
+    def _done(self, done: int, total: int, rename_only: bool):
         self._bar.set(1.0)
-        self._status.configure(text=f"Готово: {converted}/{total} файла конвертирани")
-        self._append(f"\nГотово! Конвертирани {converted}/{total} файла.")
+        verb = "преименувани" if rename_only else "конвертирани"
+        self._status.configure(text=f"Готово: {done}/{total} файла {verb}")
+        self._append(f"\nГотово! {done}/{total} файла {verb}.")
         self._converting = False
-        self._btn.configure(state="normal", text="Конвертирай в WebP")
+        self._btn.configure(state="normal", text="Старт")
 
-    def _prepare_folders(self, input_folder: str):
+    def _prepare_output_folder(self, input_folder: str) -> str | None:
         parent = os.path.dirname(input_folder)
         name = os.path.basename(input_folder)
-        old_folder = os.path.join(parent, f"{name}_old")
-        new_folder = os.path.join(parent, name)
+        new_folder = os.path.join(parent, f"new_{name}")
 
-        if os.path.exists(old_folder):
-            msg = f"Грешка: '{old_folder}' вече съществува — моля преименувайте я."
+        if os.path.exists(new_folder):
+            msg = f"Грешка: '{new_folder}' вече съществува — моля изтрийте я."
             logging.error(msg)
             self._log(msg)
-            return None, None
+            return None
 
         try:
-            os.rename(input_folder, old_folder)
-            logging.info(f"Renamed to: {old_folder}")
-            self._log(f"Оригинална папка преименувана на: {os.path.basename(old_folder)}")
-        except Exception as e:
-            msg = f"Грешка при преименуване: {e}"
-            logging.error(msg)
-            self._log(msg)
-            return None, None
-
-        try:
-            os.makedirs(new_folder, exist_ok=True)
+            os.makedirs(new_folder)
             logging.info(f"Created: {new_folder}")
-            self._log(f"Създадена нова папка: {os.path.basename(new_folder)}")
+            self._log(f"Създадена папка: new_{name}")
         except Exception as e:
             msg = f"Грешка при създаване на папка: {e}"
             logging.error(msg)
             self._log(msg)
-            try:
-                os.rename(old_folder, input_folder)
-            except Exception:
-                pass
-            return None, None
+            return None
 
-        return new_folder, old_folder
+        return new_folder
 
-    def _convert(
+    def _process(
         self,
         input_folder: str,
         quality: int,
         preserve: bool,
         delete_orig: bool,
         prefix: str,
+        rename_only: bool,
     ):
-        new_folder, old_folder = self._prepare_folders(input_folder)
+        new_folder = self._prepare_output_folder(input_folder)
         if not new_folder:
             return 0, 0
 
         total = sum(
             1
-            for _, _, files in os.walk(old_folder)
+            for _, _, files in os.walk(input_folder)
             for f in files
             if pathlib.Path(f).suffix.lower() in SUPPORTED_EXT
         )
         self._log(f"Намерени {total} поддържани файла.")
 
-        converted = 0
+        done = 0
         current = 0
 
-        for root, _, files in os.walk(old_folder):
-            rel = os.path.relpath(root, old_folder)
+        for root, _, files in os.walk(input_folder):
+            rel = os.path.relpath(root, input_folder)
             dest_dir = os.path.join(new_folder, rel)
             os.makedirs(dest_dir, exist_ok=True)
 
             for filename in files:
-                ext = pathlib.Path(filename).suffix.lower()
+                p = pathlib.Path(filename)
+                ext = p.suffix.lower()
                 if ext not in SUPPORTED_EXT:
                     self._log(f"  Пропуснат: {filename}")
                     logging.info(f"Skipped: {filename}")
@@ -269,44 +289,67 @@ class App(ctk.CTk):
 
                 current += 1
                 src = os.path.join(root, filename)
-                stem = pathlib.Path(filename).stem
-                out_name = (f"{prefix}_{stem}" if prefix else stem) + ".webp"
-                dst = os.path.join(dest_dir, out_name)
+                size_before = os.path.getsize(src)
 
-                try:
-                    img = Image.open(src)
-
-                    if not preserve and img.mode in ("RGBA", "LA"):
-                        bg = Image.new("RGB", img.size, (255, 255, 255))
-                        bg.paste(img, mask=img.split()[-1])
-                        img = bg
-
-                    img.save(dst, "WEBP", quality=quality)
-                    converted += 1
-
-                    pct = current / total if total > 0 else 1.0
-                    msg = f"  OK: {filename} → {out_name}  ({current}/{total}, {pct*100:.0f}%)"
-                    logging.info(msg.strip())
-                    self._log(msg)
-                    self._set_progress(pct, f"{current}/{total} ({pct*100:.0f}%)")
-
-                except Exception as e:
-                    err = f"  Грешка: {filename}: {e}"
-                    logging.error(err.strip())
-                    self._log(err)
+                if rename_only:
+                    out_name = f"{prefix}_{p.stem}{ext}"
+                    dst = os.path.join(dest_dir, out_name)
+                    try:
+                        shutil.copy2(src, dst)
+                        size_after = os.path.getsize(dst)
+                        done += 1
+                        pct = current / total if total > 0 else 1.0
+                        msg = (
+                            f"  OK: {filename} → {out_name}"
+                            f"  ({_fmt_size(size_before)})"
+                            f"  ({current}/{total}, {pct*100:.0f}%)"
+                        )
+                        logging.info(msg.strip())
+                        self._log(msg)
+                        self._set_progress(pct, f"{current}/{total} ({pct*100:.0f}%)")
+                    except Exception as e:
+                        err = f"  Грешка: {filename}: {e}"
+                        logging.error(err.strip())
+                        self._log(err)
+                else:
+                    out_name = (f"{prefix}_{p.stem}" if prefix else p.stem) + ".webp"
+                    dst = os.path.join(dest_dir, out_name)
+                    try:
+                        img = Image.open(src)
+                        if not preserve and img.mode in ("RGBA", "LA"):
+                            bg = Image.new("RGB", img.size, (255, 255, 255))
+                            bg.paste(img, mask=img.split()[-1])
+                            img = bg
+                        img.save(dst, "WEBP", quality=quality)
+                        size_after = os.path.getsize(dst)
+                        saving = (1 - size_after / size_before) * 100 if size_before else 0
+                        done += 1
+                        pct = current / total if total > 0 else 1.0
+                        msg = (
+                            f"  OK: {filename} → {out_name}"
+                            f"  {_fmt_size(size_before)} → {_fmt_size(size_after)}"
+                            f"  (-{saving:.0f}%)"
+                            f"  ({current}/{total}, {pct*100:.0f}%)"
+                        )
+                        logging.info(msg.strip())
+                        self._log(msg)
+                        self._set_progress(pct, f"{current}/{total} ({pct*100:.0f}%)")
+                    except Exception as e:
+                        err = f"  Грешка: {filename}: {e}"
+                        logging.error(err.strip())
+                        self._log(err)
 
         if delete_orig:
             try:
-                import shutil
-                shutil.rmtree(old_folder)
-                logging.info(f"Deleted original: {old_folder}")
-                self._log(f"  Оригиналната папка изтрита: {os.path.basename(old_folder)}")
+                shutil.rmtree(input_folder)
+                logging.info(f"Deleted original: {input_folder}")
+                self._log(f"  Оригиналната папка изтрита: {os.path.basename(input_folder)}")
             except Exception as e:
                 err = f"  Грешка при изтриване на оригинала: {e}"
                 logging.error(err)
                 self._log(err)
 
-        return converted, total
+        return done, total
 
 
 if __name__ == "__main__":
