@@ -1,0 +1,77 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  # ────────────────────────────── Windows → .exe ──────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build EXE
+        run: pyinstaller webp_converter.spec
+
+      - name: Rename artifact
+        run: move dist\WebP-Converter.exe dist\WebP-Converter-${{ github.ref_name }}-windows.exe
+        shell: cmd
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/WebP-Converter-${{ github.ref_name }}-windows.exe
+
+  # ────────────────────────────── Linux → .deb ────────────────────────────
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system libs (tkinter + GTK)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-tk libgtk-3-dev dpkg
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build binary
+        run: pyinstaller webp_converter.spec
+
+      - name: Build .deb package
+        run: |
+          chmod +x build_deb.sh
+          ./build_deb.sh "${{ github.ref_name }}"
+
+      - name: Rename artifact
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          mv "webp-converter_${VERSION}_amd64.deb" \
+             "WebP-Converter-${{ github.ref_name }}-linux.deb"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: WebP-Converter-${{ github.ref_name }}-linux.deb
