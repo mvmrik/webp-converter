@@ -70,7 +70,7 @@ class App(ctk.CTk):
         )
         ctk.CTkLabel(
             ff,
-            text="Внимание: влезте в папката с двойно кликване, depois натиснете OK",
+            text="Внимание: влезте в папката с двойно кликване, после натиснете OK",
             font=ctk.CTkFont(size=11),
             text_color="gray",
         ).grid(row=1, column=0, columnspan=3, padx=12, pady=(0, 8), sticky="w")
@@ -101,12 +101,7 @@ class App(ctk.CTk):
         self._delete_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
             sf, text="Изтриване на оригинала", variable=self._delete_var
-        ).grid(row=2, column=0, columnspan=3, padx=12, pady=(0, 6), sticky="w")
-
-        self._lowercase_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(
-            sf, text="Без главни букви", variable=self._lowercase_var
-        ).grid(row=3, column=0, columnspan=3, padx=12, pady=(0, 12), sticky="w")
+        ).grid(row=2, column=0, columnspan=3, padx=12, pady=(0, 12), sticky="w")
 
         # Prefix row
         pxf = ctk.CTkFrame(self)
@@ -128,8 +123,13 @@ class App(ctk.CTk):
             state="disabled",
         )
         self._rename_only_cb.grid(
-            row=1, column=0, columnspan=2, padx=12, pady=(0, 12), sticky="w"
+            row=1, column=0, columnspan=2, padx=12, pady=(0, 6), sticky="w"
         )
+
+        self._lowercase_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            pxf, text="Без главни букви", variable=self._lowercase_var
+        ).grid(row=2, column=0, columnspan=2, padx=12, pady=(0, 12), sticky="w")
 
         self._prefix_var.trace_add("write", self._on_prefix_change)
 
