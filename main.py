@@ -28,14 +28,22 @@ def _fmt_size(b: int) -> str:
     return f"{b / 1024 / 1024:.1f} MB"
 
 
+def _normalize_filename(name: str, lowercase: bool = True) -> str:
+    """Замени долни черти и интервали с тирета, опционално малки букви."""
+    name = name.replace("_", "-").replace(" ", "-")
+    if lowercase:
+        name = name.lower()
+    return name
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("WebP Converter")
-        self.geometry("720x640")
-        self.minsize(600, 580)
+        self.geometry("720x680")
+        self.minsize(600, 620)
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(6, weight=1)
+        self.grid_rowconfigure(7, weight=1)
         self._converting = False
         self._build_ui()
 
@@ -62,7 +70,7 @@ class App(ctk.CTk):
         )
         ctk.CTkLabel(
             ff,
-            text="Внимание: влезте в папката с двойно кликване, после натиснете OK",
+            text="Внимание: влезте в папката с двойно кликване, depois натиснете OK",
             font=ctk.CTkFont(size=11),
             text_color="gray",
         ).grid(row=1, column=0, columnspan=3, padx=12, pady=(0, 8), sticky="w")
@@ -93,11 +101,16 @@ class App(ctk.CTk):
         self._delete_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
             sf, text="Изтриване на оригинала", variable=self._delete_var
-        ).grid(row=2, column=0, columnspan=3, padx=12, pady=(0, 12), sticky="w")
+        ).grid(row=2, column=0, columnspan=3, padx=12, pady=(0, 6), sticky="w")
+
+        self._lowercase_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            sf, text="Без главни букви", variable=self._lowercase_var
+        ).grid(row=3, column=0, columnspan=3, padx=12, pady=(0, 12), sticky="w")
 
         # Prefix row
         pxf = ctk.CTkFrame(self)
-        pxf.grid(row=3, column=0, padx=20, pady=8, sticky="ew")
+        pxf.grid(row=4, column=0, padx=20, pady=8, sticky="ew")
         pxf.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(pxf, text="Префикс:").grid(row=0, column=0, padx=12, pady=12)
         self._prefix_var = ctk.StringVar()
@@ -130,11 +143,11 @@ class App(ctk.CTk):
             hover_color=("#246e3a", "#246e3a"),
             command=self._start,
         )
-        self._btn.grid(row=4, column=0, padx=20, pady=10, sticky="ew")
+        self._btn.grid(row=5, column=0, padx=20, pady=10, sticky="ew")
 
         # Progress row
         pf = ctk.CTkFrame(self)
-        pf.grid(row=5, column=0, padx=20, pady=(0, 8), sticky="ew")
+        pf.grid(row=6, column=0, padx=20, pady=(0, 8), sticky="ew")
         pf.grid_columnconfigure(0, weight=1)
         self._bar = ctk.CTkProgressBar(pf)
         self._bar.grid(row=0, column=0, padx=12, pady=(10, 4), sticky="ew")
@@ -144,7 +157,7 @@ class App(ctk.CTk):
 
         # Log area
         lf = ctk.CTkFrame(self)
-        lf.grid(row=6, column=0, padx=20, pady=(0, 20), sticky="nsew")
+        lf.grid(row=7, column=0, padx=20, pady=(0, 20), sticky="nsew")
         lf.grid_columnconfigure(0, weight=1)
         lf.grid_rowconfigure(0, weight=1)
         self._log_box = ctk.CTkTextbox(lf)
@@ -198,24 +211,29 @@ class App(ctk.CTk):
         quality = self._quality_var.get()
         preserve = self._transp_var.get()
         delete_orig = self._delete_var.get()
+        lowercase = self._lowercase_var.get()
         prefix = self._prefix_var.get().strip()
         rename_only = self._rename_only_var.get() and bool(prefix)
 
         parts = []
         if rename_only:
-            parts.append(f"само преименуване с префикс='{prefix}'")
+            parts.append(f"само преименуване, префикс='{prefix}'")
         else:
             parts.append(f"качество={quality}")
             parts.append("прозрачност=" + ("запазена" if preserve else "не запазена"))
             if prefix:
                 parts.append(f"префикс='{prefix}'")
+        if lowercase:
+            parts.append("без главни букви")
         if delete_orig:
             parts.append("оригиналът ще бъде изтрит")
 
         logging.info(f"Start: folder={folder} " + ", ".join(parts))
         self._log("Начало: " + ", ".join(parts))
 
-        done, total = self._process(folder, quality, preserve, delete_orig, prefix, rename_only)
+        done, total = self._process(
+            folder, quality, preserve, delete_orig, prefix, rename_only, lowercase
+        )
         logging.info(f"Done: {done}/{total}")
         self.after(0, self._done, done, total, rename_only)
 
@@ -258,6 +276,7 @@ class App(ctk.CTk):
         delete_orig: bool,
         prefix: str,
         rename_only: bool,
+        lowercase: bool,
     ):
         new_folder = self._prepare_output_folder(input_folder)
         if not new_folder:
@@ -291,8 +310,10 @@ class App(ctk.CTk):
                 src = os.path.join(root, filename)
                 size_before = os.path.getsize(src)
 
+                stem = _normalize_filename(p.stem, lowercase)
+
                 if rename_only:
-                    out_name = f"{prefix}_{p.stem}{ext}"
+                    out_name = f"{prefix}-{stem}{ext}"
                     dst = os.path.join(dest_dir, out_name)
                     try:
                         shutil.copy2(src, dst)
@@ -312,7 +333,7 @@ class App(ctk.CTk):
                         logging.error(err.strip())
                         self._log(err)
                 else:
-                    out_name = (f"{prefix}_{p.stem}" if prefix else p.stem) + ".webp"
+                    out_name = (f"{prefix}-{stem}" if prefix else stem) + ".webp"
                     dst = os.path.join(dest_dir, out_name)
                     try:
                         img = Image.open(src)
