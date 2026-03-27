@@ -320,7 +320,7 @@ class App(ctk.CTk):
                             bg = Image.new("RGB", img.size, (255, 255, 255))
                             bg.paste(img, mask=img.split()[-1])
                             img = bg
-                        img.save(dst, "WEBP", quality=quality)
+                        img.save(dst, "WEBP", quality=quality, method=6)
                         size_after = os.path.getsize(dst)
                         saving = (1 - size_after / size_before) * 100 if size_before else 0
                         done += 1
